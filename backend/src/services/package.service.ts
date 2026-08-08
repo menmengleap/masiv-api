@@ -183,8 +183,14 @@ export async function deletePackage(id: string): Promise<void> {
   if (!pkgRows[0]) throw notFound('Package not found');
 
   await withTransaction(async (client) => {
-    await client.query('DELETE FROM tokens WHERE package_id = $1 AND is_used = FALSE', [id]);
-    await client.query('UPDATE orders SET package_id = NULL WHERE package_id = $1', [id]);
+    const { rows: orderIds } = await client.query<{ id: string }>(
+      'SELECT id FROM orders WHERE package_id = $1', [id],
+    );
+    for (const o of orderIds) {
+      await client.query('DELETE FROM payments WHERE order_id = $1', [o.id]);
+    }
+    await client.query('DELETE FROM orders WHERE package_id = $1', [id]);
+    await client.query('DELETE FROM tokens WHERE package_id = $1', [id]);
     await client.query('DELETE FROM packages WHERE id = $1', [id]);
   });
 }
