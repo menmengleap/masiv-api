@@ -12,6 +12,13 @@ function fmtDate(iso: string | null): string {
   return iso.slice(0, 10);
 }
 
+/** "14:32 UTC" — a concrete deadline the customer can check against a clock. */
+function fmtTimeUtc(d: Date): string {
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm} UTC`;
+}
+
 /** Package details card shown before Buy Now. */
 export function packageDetail(pkg: StorePackage, settings: BotSettingsRow): string {
   const rate = Number(settings.usd_to_usdt) || 1;
@@ -41,35 +48,102 @@ export function packageDetail(pkg: StorePackage, settings: BotSettingsRow): stri
   return lines.join('\n');
 }
 
-/** Payment instructions after an order is created. */
-export function paymentInstructions(params: {
+/** Payment method chooser card shown after "Buy Now". */
+export function paymentMethodPrompt(
+  pkg: StorePackage,
+  settings: BotSettingsRow,
+  available: { khqr: boolean; usdt: boolean },
+): string {
+  const rate = Number(settings.usd_to_usdt) || 1;
+  const amount = (Number(pkg.price) * rate).toFixed(2);
+  const lines = [
+    '💳 *CHOOSE PAYMENT METHOD*',
+    '',
+    `Package: *${esc(pkg.name.toUpperCase())}*`,
+    `Amount: *${esc(amount)} ${esc(settings.payment_currency)}*`,
+    '',
+  ];
+  if (available.khqr) {
+    lines.push(
+      esc('🇰🇭 KHQR — scan to pay with any Cambodian bank app (ABA, Wing, ACLEDA, etc.). Instant delivery.'),
+    );
+  }
+  if (available.usdt) {
+    lines.push(esc('💵 USDT (Crypto) — arranged manually with our Support team.'));
+  }
+  return lines.join('\n');
+}
+
+/** Shown when an admin has switched every payment method off. */
+export function noPaymentMethodsMessage(supportUsername: string | null): string {
+  const contact = supportUsername
+    ? `Please contact Support: ${supportUsername}`
+    : 'Please check back shortly.';
+  return `⚠️ PAYMENTS UNAVAILABLE\n\nNo payment methods are currently enabled.\n\n${contact}`;
+}
+
+/** Caption for the KHQR QR photo. */
+export function khqrInstructions(params: {
   orderNumber: string;
   amount: string;
   currency: string;
-  wallet: string | null;
-  network: string | null;
+  expiresAt: Date;
   timeoutMinutes: number;
 }): string {
-  const walletLine = params.wallet
-    ? `\`${esc(params.wallet)}\``
-    : esc('⚠️ No wallet configured — please contact support');
   return [
-    '💳 *PAYMENT*',
+    '🇰🇭 *PAY WITH KHQR*',
     '',
     `Order: \`${esc(params.orderNumber)}\``,
     `Amount: *${esc(params.amount)} ${esc(params.currency)}*`,
-    params.network ? `Network: *${esc(params.network)}*` : '',
     '',
-    '📤 Send the exact amount to:',
-    walletLine,
+    esc('📱 Scan the QR above with your banking app (ABA, Wing, ACLEDA, etc.) '),
+    esc('or tap “Open in browser” to pay.'),
     '',
-    `⏳ This invoice expires in *${params.timeoutMinutes} minutes*\\.`,
+    `⏳ Expires in *${params.timeoutMinutes} minutes* \\(${esc(fmtTimeUtc(params.expiresAt))}\\)\\.`,
+    esc('After that the QR stops working and your reserved API is released.'),
     '',
-    esc('After sending, tap “I have paid” and submit your transaction hash. '),
-    esc('Your API is delivered automatically once payment is verified.'),
-  ]
-    .filter(Boolean)
-    .join('\n');
+    esc('Your API is delivered here automatically once payment is confirmed.'),
+  ].join('\n');
+}
+
+/** Sent when a customer chooses USDT/crypto — routes them to Support. */
+export function usdtSupportMessage(params: {
+  supportUsername: string | null;
+  packageName: string;
+  amount: string;
+  currency: string;
+  network: string | null;
+}): string {
+  const lines = [
+    '💵 USDT / CRYPTO PAYMENT',
+    '',
+    `Package: ${params.packageName}`,
+    `Amount: ${params.amount} ${params.currency}`,
+  ];
+  if (params.network) lines.push(`Network: ${params.network}`);
+  lines.push(
+    '',
+    'Crypto payments are handled manually by our team.',
+    params.supportUsername
+      ? `Contact Support to pay by USDT: ${params.supportUsername}`
+      : 'Support contact has not been configured yet. Please use KHQR, or check back soon.',
+    '',
+    'Quote the package name above and our team will confirm your payment and deliver your API key here.',
+  );
+  return lines.join('\n');
+}
+
+/** Sent when a pending order's payment window elapses. */
+export function orderExpiredMessage(params: { orderNumber: string; packageName: string }): string {
+  return [
+    '⏳ PAYMENT WINDOW EXPIRED',
+    '',
+    `Order: ${params.orderNumber}`,
+    `Package: ${params.packageName}`,
+    '',
+    'Your QR has expired and the reserved API has been released.',
+    'No payment was taken. Tap “Buy API” to start a new order.',
+  ].join('\n');
 }
 
 /** Successful delivery receipt. */

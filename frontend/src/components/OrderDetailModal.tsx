@@ -77,6 +77,13 @@ export function OrderDetailModal({
           </Field>
           <Field label="Package"><span className="text-gray-200">{order.package_name}</span></Field>
           <Field label="Amount"><span className="text-gray-200">{formatMoney(order.amount, order.currency)}</span></Field>
+          <Field label="Method">
+            <span className="text-gray-200">
+              {order.payment_method
+                ? { khqr: '🇰🇭 KHQR', usdt: '💵 USDT (crypto)', manual: '✍️ Manual' }[order.payment_method]
+                : '—'}
+            </span>
+          </Field>
           <Field label="Created"><span className="text-gray-200">{formatDateTime(order.created_at)}</span></Field>
           <Field label="Completed"><span className="text-gray-200">{formatDateTime(order.completed_at)}</span></Field>
         </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Save, Bot, FileText, Wallet, QrCode } from 'lucide-react';
+import { Save, Bot, FileText, Wallet, QrCode, Bitcoin } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { BotSettings, ServicePolicies } from '../lib/types';
 import { useApi } from '../hooks/useApi';
@@ -37,8 +37,10 @@ type SettingsForm = {
   support_username: string;
   documentation_url: string;
   khqr_profile_id: string;
+  /** Write-only: blank means "leave the stored key alone". */
   khqr_secret_key: string;
   khqr_enabled: boolean;
+  usdt_enabled: boolean;
 };
 
 function toForm(s: BotSettings): SettingsForm {
@@ -53,8 +55,10 @@ function toForm(s: BotSettings): SettingsForm {
     support_username: s.support_username ?? '',
     documentation_url: s.documentation_url ?? '',
     khqr_profile_id: s.khqr_profile_id ?? '',
-    khqr_secret_key: s.khqr_secret_key ?? '',
+    // The API never returns the secret, so this always starts blank.
+    khqr_secret_key: '',
     khqr_enabled: s.khqr_enabled ?? false,
+    usdt_enabled: s.usdt_enabled ?? false,
   };
 }
 
@@ -87,8 +91,11 @@ function BotSettingsForm() {
         support_username: form.support_username.trim() || null,
         documentation_url: form.documentation_url.trim() || null,
         khqr_profile_id: form.khqr_profile_id.trim() || null,
-        khqr_secret_key: form.khqr_secret_key.trim() || null,
+        // Blank = untouched. Sending '' tells the server to keep the stored key
+        // rather than wiping a secret the form was never given.
+        khqr_secret_key: form.khqr_secret_key,
         khqr_enabled: form.khqr_enabled,
+        usdt_enabled: form.usdt_enabled,
       };
       const updated = await api.put<BotSettings>('/api/settings', payload);
       setForm(toForm(updated));
@@ -129,52 +136,102 @@ function BotSettingsForm() {
 
         <div className="border-t border-ink-750 pt-5">
           <p className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-300">
-            <Wallet className="h-4 w-4 text-brand-400" /> Payment
+            <Wallet className="h-4 w-4 text-brand-400" /> Pricing &amp; checkout
           </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Payment currency">
               <input className="input" value={form.payment_currency} placeholder="USDT" onChange={(e) => set('payment_currency', e.target.value)} />
             </Field>
-            <Field label="Network" hint="e.g. TRC20, ERC20, BEP20.">
-              <input className="input" value={form.payment_network} placeholder="TRC20" onChange={(e) => set('payment_network', e.target.value)} />
-            </Field>
-            <Field label="Receiving wallet address" hint="Customers send USDT here. Displayed by the bot at checkout.">
-              <input className="input font-mono" value={form.payment_wallet} placeholder="T…" spellCheck={false} onChange={(e) => set('payment_wallet', e.target.value)} />
-            </Field>
-            <Field label="Payment timeout (minutes)" hint="Unpaid orders auto-expire and release stock.">
+            <Field label="Payment timeout (minutes)" hint="How long a KHQR stays valid. Unpaid orders auto-expire and release stock.">
               <input className="input" inputMode="numeric" value={form.payment_timeout_minutes} onChange={(e) => set('payment_timeout_minutes', e.target.value)} />
             </Field>
           </div>
         </div>
 
         <div className="border-t border-ink-750 pt-5">
-          <p className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-300">
+          <p className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-300">
             <QrCode className="h-4 w-4 text-brand-400" /> KHQR Payment Gateway
+          </p>
+          <p className="mb-3 text-xs text-gray-500">
+            Automated. Customers scan a QR with any Bakong bank app (ABA, Wing, ACLEDA…) and the API key is
+            delivered the moment khqr.cc confirms the payment.
           </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="flex items-center gap-3 md:col-span-2">
-              <label className="relative inline-flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  checked={form.khqr_enabled}
-                  onChange={(e) => set('khqr_enabled', e.target.checked)}
-                />
-                <div className="h-6 w-11 rounded-full bg-ink-700 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-gray-400 after:transition-all peer-checked:bg-brand-600 peer-checked:after:translate-x-full peer-checked:after:bg-white" />
-                <span className="text-sm text-gray-300">Enable KHQR payments</span>
-              </label>
+              <Toggle
+                checked={form.khqr_enabled}
+                onChange={(v) => set('khqr_enabled', v)}
+                label="Enable KHQR payments"
+              />
             </div>
             <Field label="KHQR Profile ID" hint="From your KHQR.cc dashboard.">
-              <input className="input font-mono" value={form.khqr_profile_id} placeholder="QrBbF2nv..." spellCheck={false} onChange={(e) => set('khqr_profile_id', e.target.value)} />
+              <input className="input font-mono" value={form.khqr_profile_id} placeholder="QrBbF2nv…" spellCheck={false} onChange={(e) => set('khqr_profile_id', e.target.value)} />
             </Field>
-            <Field label="KHQR Secret Key" hint="Used to sign payment hashes. Never share this.">
-              <input className="input font-mono" type="password" value={form.khqr_secret_key} placeholder="Your secret key" spellCheck={false} onChange={(e) => set('khqr_secret_key', e.target.value)} />
+            <Field
+              label="KHQR Secret Key"
+              hint={
+                settings.data?.khqr_secret_key_set
+                  ? 'A key is saved. Leave blank to keep it; type a new one to replace it.'
+                  : 'Not set yet. Used to sign payment requests — never leaves the server.'
+              }
+            >
+              <input
+                className="input font-mono"
+                type="password"
+                autoComplete="new-password"
+                value={form.khqr_secret_key}
+                placeholder={settings.data?.khqr_secret_key_set ? '•••••••• (saved)' : 'Your secret key'}
+                spellCheck={false}
+                onChange={(e) => set('khqr_secret_key', e.target.value)}
+              />
             </Field>
           </div>
           <p className="mt-2 text-xs text-gray-500">
-            When enabled, customers can pay via KHQR (ABA Pay, Wing, etc.). Webhook URL: {window.location.origin.replace('frontend', 'api').replace('5173', '4000')}/webhooks/khqr
+            Set this webhook URL in your KHQR.cc dashboard: <code className="font-mono text-gray-400">{import.meta.env.VITE_API_URL ?? window.location.origin}/webhooks/khqr</code>
           </p>
+          {form.khqr_enabled && !(form.khqr_profile_id.trim() && (settings.data?.khqr_secret_key_set || form.khqr_secret_key)) && (
+            <p className="mt-2 text-xs text-amber-400">
+              KHQR is enabled but not fully configured — the bot will hide it until both a profile ID and a secret key are saved.
+            </p>
+          )}
         </div>
+
+        <div className="border-t border-ink-750 pt-5">
+          <p className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-300">
+            <Bitcoin className="h-4 w-4 text-brand-400" /> USDT / Crypto Payment
+          </p>
+          <p className="mb-3 text-xs text-gray-500">
+            Manual. There is no automated crypto verification — customers who pick this are told to contact
+            Support, and an admin confirms the payment from the Orders page.
+          </p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="flex items-center gap-3 md:col-span-2">
+              <Toggle
+                checked={form.usdt_enabled}
+                onChange={(v) => set('usdt_enabled', v)}
+                label="Enable USDT (crypto) payments"
+              />
+            </div>
+            <Field label="Network" hint="e.g. TRC20, ERC20, BEP20. Shown to the customer.">
+              <input className="input" value={form.payment_network} placeholder="TRC20" onChange={(e) => set('payment_network', e.target.value)} />
+            </Field>
+            <Field label="Receiving wallet address" hint="Recorded on crypto invoices for reconciliation.">
+              <input className="input font-mono" value={form.payment_wallet} placeholder="T…" spellCheck={false} onChange={(e) => set('payment_wallet', e.target.value)} />
+            </Field>
+          </div>
+          {form.usdt_enabled && !form.support_username.trim() && (
+            <p className="mt-2 text-xs text-amber-400">
+              Set a Support username above — crypto customers are told to contact Support, and right now there's
+              no handle to send them to.
+            </p>
+          )}
+        </div>
+
+        {!form.khqr_enabled && !form.usdt_enabled && (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+            Every payment method is disabled — customers cannot check out.
+          </p>
+        )}
 
         <Field label="Welcome message" hint="Sent on /start. Supports plain text.">
           <textarea
@@ -270,5 +327,23 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       {children}
       {hint && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
     </div>
+  );
+}
+
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+}) {
+  return (
+    <label className="relative inline-flex cursor-pointer items-center gap-2">
+      <input type="checkbox" className="peer sr-only" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <div className="h-6 w-11 rounded-full bg-ink-700 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-gray-400 after:transition-all peer-checked:bg-brand-600 peer-checked:after:translate-x-full peer-checked:after:bg-white" />
+      <span className="text-sm text-gray-300">{label}</span>
+    </label>
   );
 }

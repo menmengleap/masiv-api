@@ -1,10 +1,9 @@
 import { Router } from 'express';
-import { config } from '../config/index.js';
 import { query } from '../db/pool.js';
 import { asyncHandler } from '../middleware/error.js';
 import { badRequest } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
-import { buildKhqrCheckoutUrl, verifyKhqrCallback } from '../services/khqr.service.js';
+import { buildOrderKhqrCheckout, verifyKhqrCallback } from '../services/khqr.service.js';
 import { getOrder, confirmPayment } from '../services/order.service.js';
 import { sendOrderDelivery } from '../bot/index.js';
 import type { OrderRow } from '../types.js';
@@ -29,17 +28,14 @@ khqrRouter.post(
       throw badRequest(`Order is "${order.status}" — only pending orders can be paid`);
     }
 
-    const frontendBase = config.frontendUrl.replace(/\/+$/, '');
-    const successUrl = `${frontendBase}/payment/success?order=${order.order_number}`;
+    const result = await buildOrderKhqrCheckout(order);
 
-    const result = await buildKhqrCheckoutUrl({
-      orderNumber: order.order_number,
-      amount: Number(order.amount),
-      successUrl,
-      remark: `Order ${order.order_number}`,
+    res.json({
+      checkout_url: result.checkoutUrl,
+      qr_payload: result.qrPayload,
+      transaction_id: result.transactionId,
+      expires_at: result.expiresAt,
     });
-
-    res.json({ checkout_url: result.url, transaction_id: result.transactionId });
   }),
 );
 
@@ -94,6 +90,24 @@ khqrWebhookRouter.post(
     if (!order) {
       logger.info('khqr', `Order ${transaction_id} not found or not pending — skipping`);
       res.json({ ok: true, processed: false });
+      return;
+    }
+
+    // The signature proves the callback came from KHQR, not that it paid the
+    // right amount. Compare against what we invoiced before releasing an API
+    // key, so a valid callback for a smaller sum can't complete the order.
+    const { rows: payRows } = await query<{ amount: string }>(
+      "SELECT amount FROM payments WHERE order_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+      [order.id],
+    );
+    const expected = Number(payRows[0]?.amount ?? order.amount);
+    const paid = Number(amount);
+    if (!Number.isFinite(paid) || paid + 0.001 < expected) {
+      logger.warn(
+        'khqr',
+        `Amount mismatch for ${transaction_id}: paid ${amount}, expected ${expected} — not confirming`,
+      );
+      res.status(400).json({ error: 'Amount mismatch' });
       return;
     }
 

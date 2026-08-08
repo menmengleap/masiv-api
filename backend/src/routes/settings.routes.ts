@@ -3,7 +3,7 @@ import { asyncHandler } from '../middleware/error.js';
 import { validate } from '../middleware/validate.js';
 import { updatePoliciesSchema, updateSettingsSchema } from '../schemas.js';
 import { audit } from '../services/audit.service.js';
-import { getSettings, updateSettings } from '../services/settings.service.js';
+import { getAdminSettings, updateSettings } from '../services/settings.service.js';
 import { getPolicies, updatePolicies } from '../services/policy.service.js';
 
 export const settingsRouter = Router();
@@ -11,7 +11,8 @@ export const settingsRouter = Router();
 settingsRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
-    res.json(await getSettings());
+    // Redacted view — the KHQR secret key must never reach the browser.
+    res.json(await getAdminSettings());
   }),
 );
 

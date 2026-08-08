@@ -2,10 +2,10 @@ import type { Context } from 'telegraf';
 
 /**
  * Per-user conversation state for the purchase flow, kept in memory.
- * awaitingTxHashForOrder: the order id we're expecting a transaction hash for.
+ * Reserved for future use — the KHQR/USDT checkout flow is stateless.
  */
 export interface SessionState {
-  awaitingTxHashForOrder?: string;
+  [key: string]: unknown;
 }
 
 export interface BotContext extends Context {

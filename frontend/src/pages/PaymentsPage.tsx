@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Wallet, Filter } from 'lucide-react';
 import { api } from '../lib/api';
-import type { PaymentStatus, PaymentView, Paginated } from '../lib/types';
+import type { PaymentMethod, PaymentStatus, PaymentView, Paginated } from '../lib/types';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
@@ -22,6 +22,17 @@ const STATUS_FILTERS: Array<{ value: PaymentStatus | ''; label: string }> = [
   { value: 'expired', label: 'Expired' },
   { value: 'refunded', label: 'Refunded' },
 ];
+
+const METHOD_LABELS: Record<PaymentMethod, string> = {
+  khqr: '🇰🇭 KHQR',
+  usdt: '💵 USDT',
+  manual: '✍️ Manual',
+};
+
+function MethodCell({ method }: { method: PaymentMethod | null }) {
+  if (!method) return <span className="text-gray-600">—</span>;
+  return <span className="whitespace-nowrap text-gray-300">{METHOD_LABELS[method] ?? method}</span>;
+}
 
 export function PaymentsPage() {
   const [status, setStatus] = useState<PaymentStatus | ''>('');
@@ -45,7 +56,7 @@ export function PaymentsPage() {
     <div>
       <PageHeader
         title="Payments"
-        description="USDT payment records for store orders. Confirmation is verified server-side before credentials are released."
+        description="Payment records for store orders — KHQR is confirmed automatically by the gateway; USDT is confirmed by an admin. Credentials are only released after server-side verification."
       />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -83,10 +94,11 @@ export function PaymentsPage() {
           <Table>
             <THead>
               <th className="th">Order</th>
+              <th className="th">Method</th>
               <th className="th">Amount</th>
               <th className="th">Network</th>
               <th className="th">Wallet</th>
-              <th className="th">Tx Hash</th>
+              <th className="th">Tx Reference</th>
               <th className="th">Status</th>
               <th className="th">Created</th>
               <th className="th">Confirmed</th>
@@ -95,6 +107,7 @@ export function PaymentsPage() {
               {items.map((p) => (
                 <TR key={p.id}>
                   <td className="td font-mono text-xs text-gray-300">{p.order_number}</td>
+                  <td className="td"><MethodCell method={p.method} /></td>
                   <td className="td whitespace-nowrap">{formatMoney(p.amount, p.currency)}</td>
                   <td className="td">{p.network || <span className="text-gray-600">—</span>}</td>
                   <td className="td">

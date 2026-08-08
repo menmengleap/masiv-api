@@ -159,7 +159,7 @@ export function TelegramPage() {
           <div className="flex items-start gap-3 rounded-xl border border-ink-700 bg-ink-850 p-4">
             <Send className="mt-0.5 h-5 w-5 shrink-0 text-brand-400" />
             <p className="text-sm text-gray-500">
-              Customize the welcome message, USDT wallet, network, and payment timeout under{' '}
+              Customize the welcome message, payment methods (KHQR and USDT), and payment timeout under{' '}
               <Link to="/settings" className="text-brand-400 hover:text-brand">Settings</Link>. All bot content is
               database-driven.
             </p>

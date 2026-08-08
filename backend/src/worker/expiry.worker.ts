@@ -2,6 +2,7 @@ import { config } from '../config/index.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { expireStaleOrders } from '../services/order.service.js';
+import { sendOrderExpired } from '../bot/index.js';
 
 /**
  * Expiry worker.
@@ -72,14 +73,19 @@ export async function runExpiryPass(): Promise<{
     [threshold],
   );
 
-  // 4) Release stock from timed-out pending orders.
+  // 4) Release stock from timed-out pending orders, and let each customer know
+  //    their QR ran out of time (otherwise the payment window is invisible to
+  //    them and they'd sit waiting on a dead QR).
   const ordersExpired = await expireStaleOrders();
+  for (const orderId of ordersExpired) {
+    void sendOrderExpired(orderId);
+  }
 
   return {
     expired: expiredRes.rowCount ?? 0,
     expiring: expiringRes.rowCount ?? 0,
     reactivated: reactivatedRes.rowCount ?? 0,
-    orders_expired: ordersExpired,
+    orders_expired: ordersExpired.length,
   };
 }
 

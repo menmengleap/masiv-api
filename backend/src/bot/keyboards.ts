@@ -43,10 +43,57 @@ export function packageDetailKeyboard(pkg: StorePackage) {
   return Markup.inlineKeyboard(rows);
 }
 
-export function paymentKeyboard(orderId: string) {
+/**
+ * Turn an admin-configured support handle into a tappable t.me link.
+ * Accepts "@masiv", "masiv", or a full https://t.me/… URL. Returns null when
+ * the value isn't something we can safely build a URL from, so the caller can
+ * fall back to plain text instead of rendering a broken button.
+ */
+export function supportUrl(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const raw = handle.trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const username = raw.replace(/^@/, '');
+  return /^[A-Za-z0-9_]{4,32}$/.test(username) ? `https://t.me/${username}` : null;
+}
+
+/**
+ * Payment method chooser shown after "Buy Now".
+ * Each method is gated on its own switch in Settings, so an admin can run
+ * KHQR-only, crypto-only, or both.
+ */
+export function paymentMethodKeyboard(
+  packageId: string,
+  opts: { khqrEnabled: boolean; usdtEnabled: boolean },
+) {
+  const rows: Btn[][] = [];
+  if (opts.khqrEnabled) {
+    rows.push([Markup.button.callback('🇰🇭 Pay with KHQR', `paykhqr:${packageId}`)]);
+  }
+  if (opts.usdtEnabled) {
+    rows.push([Markup.button.callback('💵 Pay with USDT (Crypto)', `payusdt:${packageId}`)]);
+  }
+  rows.push([Markup.button.callback('⬅️ Back', `pkg:${packageId}`)]);
+  return Markup.inlineKeyboard(rows);
+}
+
+/** Crypto handoff: give the customer a one-tap way to reach Support. */
+export function usdtSupportKeyboard(packageId: string, supportHandle: string | null) {
+  const rows: Btn[][] = [];
+  const url = supportUrl(supportHandle);
+  if (url) rows.push([Markup.button.url('💬 Contact Support', url)]);
+  rows.push([Markup.button.callback('⬅️ Back', `buy:${packageId}`)]);
+  rows.push([Markup.button.callback('🏠 Home', 'menu:home')]);
+  return Markup.inlineKeyboard(rows);
+}
+
+/** Actions attached to the KHQR QR message. */
+export function khqrPaymentKeyboard(orderId: string, checkoutUrl: string) {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('✅ I have paid — submit TX hash', `paid:${orderId}`)],
+    [Markup.button.url('🌐 Open in browser', checkoutUrl)],
     [Markup.button.callback('❌ Cancel order', `cancel:${orderId}`)],
+    [Markup.button.callback('🏠 Home', 'menu:home')],
   ]);
 }
 
@@ -70,4 +117,13 @@ export function myPackagesKeyboard(tokens: Array<{ id: string; total_tokens: str
 
 export function backHomeKeyboard() {
   return Markup.inlineKeyboard([[Markup.button.callback('🏠 Home', 'menu:home')]]);
+}
+
+/** Support screen — adds a tappable contact button when a handle is configured. */
+export function supportMenuKeyboard(supportHandle: string | null) {
+  const rows: Btn[][] = [];
+  const url = supportUrl(supportHandle);
+  if (url) rows.push([Markup.button.url('💬 Contact Support', url)]);
+  rows.push([Markup.button.callback('🏠 Home', 'menu:home')]);
+  return Markup.inlineKeyboard(rows);
 }

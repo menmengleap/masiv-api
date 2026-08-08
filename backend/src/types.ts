@@ -21,6 +21,14 @@ export type OrderStatus =
 
 export type PaymentStatus = 'pending' | 'confirmed' | 'failed' | 'expired' | 'refunded';
 
+/**
+ * How a payment is collected.
+ *  - khqr:   automated via the khqr.cc gateway (scan-to-pay, webhook-confirmed)
+ *  - usdt:   crypto, arranged manually with Support and confirmed by an admin
+ *  - manual: any other off-platform arrangement confirmed by an admin
+ */
+export type PaymentMethod = 'khqr' | 'usdt' | 'manual';
+
 export interface PackageRow {
   id: string;
   name: string;
@@ -85,6 +93,7 @@ export interface PaymentRow {
   order_id: string;
   currency: string;
   amount: string;
+  method: PaymentMethod;
   network: string | null;
   wallet_address: string | null;
   transaction_hash: string | null;
@@ -108,6 +117,7 @@ export interface BotSettingsRow {
   khqr_profile_id: string | null;
   khqr_secret_key: string | null;
   khqr_enabled: boolean;
+  usdt_enabled: boolean;
   updated_at: string;
 }
 

@@ -8,24 +8,39 @@ import { botController } from './controller.js';
 import {
   backHomeKeyboard,
   deliveryKeyboard,
+  khqrPaymentKeyboard,
   mainMenuKeyboard,
   myPackagesKeyboard,
   packageDetailKeyboard,
   packagesKeyboard,
-  paymentKeyboard,
+  paymentMethodKeyboard,
+  supportMenuKeyboard,
+  usdtSupportKeyboard,
 } from './keyboards.js';
-import { deliveryMessage, esc, myTokenLine, packageDetail, paymentInstructions } from './messages.js';
+import {
+  deliveryMessage,
+  esc,
+  khqrInstructions,
+  myTokenLine,
+  noPaymentMethodsMessage,
+  orderExpiredMessage,
+  packageDetail,
+  paymentMethodPrompt,
+  usdtSupportMessage,
+} from './messages.js';
 import { getSettings } from '../services/settings.service.js';
 import { getPolicies } from '../services/policy.service.js';
 import { createOrderForPackage } from '../services/order.service.js';
+import { buildOrderKhqrCheckout } from '../services/khqr.service.js';
+import { qrPngBuffer } from '../lib/qr.js';
 import {
   ensureCustomer,
   getDeliveryInfo,
   getMyTokens,
+  getOrderNotifyInfo,
   getStorePackage,
   getStorePackages,
   revealMyKey,
-  submitTransactionHash,
   trackTelegramUser,
 } from '../services/storefront.service.js';
 
@@ -106,23 +121,106 @@ async function showPackageDetail(ctx: BotContext, id: string) {
   });
 }
 
-async function startPurchase(ctx: BotContext, packageId: string) {
-  const u = tgUser(ctx);
-  const customerId = await ensureCustomer(u);
-  const settings = await getSettings();
+/**
+ * Which payment methods are currently on offer.
+ *
+ * KHQR only counts as available when it is both switched on AND actually
+ * configured — otherwise the customer taps the button, we reserve stock, and
+ * the checkout call fails.
+ */
+function availableMethods(settings: {
+  khqr_enabled: boolean;
+  khqr_profile_id: string | null;
+  khqr_secret_key: string | null;
+  usdt_enabled: boolean;
+}) {
+  return {
+    khqr: Boolean(settings.khqr_enabled && settings.khqr_profile_id && settings.khqr_secret_key),
+    usdt: Boolean(settings.usdt_enabled),
+  };
+}
 
-  const { order, payment, package: pkg } = await createOrderForPackage(customerId, packageId);
+/** Step 1: after "Buy Now", ask the customer how they want to pay. */
+async function showPaymentMethods(ctx: BotContext, packageId: string) {
+  const [pkg, settings] = await Promise.all([getStorePackage(packageId), getSettings()]);
+  if (pkg.stock_available <= 0) {
+    await safeEditOrReply(ctx, '⛔ This package just went out of stock. Please pick another.', backHomeKeyboard());
+    return;
+  }
 
-  const text = paymentInstructions({
-    orderNumber: order.order_number,
-    amount: Number(payment.amount).toFixed(2),
-    currency: payment.currency,
-    wallet: payment.wallet_address,
-    network: payment.network,
-    timeoutMinutes: settings.payment_timeout_minutes,
+  const available = availableMethods(settings);
+  if (!available.khqr && !available.usdt) {
+    await safeEditOrReply(ctx, noPaymentMethodsMessage(settings.support_username), backHomeKeyboard());
+    return;
+  }
+
+  await safeEditOrReply(ctx, paymentMethodPrompt(pkg, settings, available), {
+    parse_mode: 'MarkdownV2',
+    ...paymentMethodKeyboard(packageId, { khqrEnabled: available.khqr, usdtEnabled: available.usdt }),
   });
-  logger.info('bot', `Order ${order.order_number} started by @${u.username ?? u.id} for ${pkg.name}`);
-  await safeEditOrReply(ctx, text, { parse_mode: 'MarkdownV2', ...paymentKeyboard(order.id) });
+}
+
+/** Step 2a: KHQR — reserve stock, create the order, and send a QR with a deadline. */
+async function startKhqrPurchase(ctx: BotContext, packageId: string) {
+  const u = tgUser(ctx);
+  const settings = await getSettings();
+  if (!availableMethods(settings).khqr) {
+    await safeEditOrReply(ctx, '⚠️ KHQR payments are currently unavailable.', backHomeKeyboard());
+    return;
+  }
+
+  const customerId = await ensureCustomer(u);
+  const { order, payment, package: pkg } = await createOrderForPackage(customerId, packageId, 'khqr');
+
+  try {
+    const checkout = await buildOrderKhqrCheckout(order);
+    const png = await qrPngBuffer(checkout.qrPayload);
+    const caption = khqrInstructions({
+      orderNumber: order.order_number,
+      amount: Number(payment.amount).toFixed(2),
+      currency: payment.currency,
+      // The invoice deadline is the source of truth for the QR's lifetime —
+      // the expiry worker cancels the order at exactly this moment.
+      expiresAt: payment.expires_at ? new Date(payment.expires_at) : new Date(),
+      timeoutMinutes: settings.payment_timeout_minutes,
+    });
+    await ctx.replyWithPhoto(
+      { source: png },
+      { caption, parse_mode: 'MarkdownV2', ...khqrPaymentKeyboard(order.id, checkout.checkoutUrl) },
+    );
+    logger.info('bot', `KHQR order ${order.order_number} started by @${u.username ?? u.id} for ${pkg.name}`);
+  } catch (err) {
+    // Building the QR failed (e.g. KHQR not configured) — release the reservation
+    // so we don't strand stock, then surface the reason.
+    const { cancelOrder } = await import('../services/order.service.js');
+    await cancelOrder(order.id).catch(() => undefined);
+    throw err;
+  }
+}
+
+/**
+ * Step 2b: USDT/crypto — handled manually, so we hand the customer to Support
+ * rather than reserving stock against a payment we can't verify automatically.
+ */
+async function showUsdtSupport(ctx: BotContext, packageId: string) {
+  const [pkg, settings] = await Promise.all([getStorePackage(packageId), getSettings()]);
+  if (!settings.usdt_enabled) {
+    await safeEditOrReply(ctx, '⚠️ Crypto payments are currently unavailable.', backHomeKeyboard());
+    return;
+  }
+
+  const rate = Number(settings.usd_to_usdt) || 1;
+  await safeEditOrReply(
+    ctx,
+    usdtSupportMessage({
+      supportUsername: settings.support_username,
+      packageName: pkg.name,
+      amount: (Number(pkg.price) * rate).toFixed(2),
+      currency: settings.payment_currency,
+      network: settings.payment_network,
+    }),
+    usdtSupportKeyboard(packageId, settings.support_username),
+  );
 }
 
 async function showMyPackages(ctx: BotContext) {
@@ -155,7 +253,7 @@ async function showSupport(ctx: BotContext) {
   const support = settings.support_username
     ? `Contact us: ${settings.support_username}`
     : 'Support contact has not been configured yet.';
-  await safeEditOrReply(ctx, `💬 SUPPORT\n\n${support}`, backHomeKeyboard());
+  await safeEditOrReply(ctx, `💬 SUPPORT\n\n${support}`, supportMenuKeyboard(settings.support_username));
 }
 
 async function showDocs(ctx: BotContext) {
@@ -264,26 +362,37 @@ export function buildBot(): Telegraf<BotContext> | null {
     await showPackageDetail(ctx, ctx.match[1]);
   });
 
-  // Buy → create order
+  // Buy → choose a payment method
   b.action(/^buy:(.+)$/, async (ctx) => {
     try {
-      await ctx.answerCbQuery('Reserving your API…');
-      await startPurchase(ctx, ctx.match[1]);
+      await ctx.answerCbQuery();
+      await showPaymentMethods(ctx, ctx.match[1]);
     } catch (err) {
       const msg = err instanceof AppError ? err.message : 'Could not start purchase';
       await safeEditOrReply(ctx, `⚠️ ${msg}`, backHomeKeyboard());
     }
   });
 
-  // "I have paid" → ask for TX hash
-  b.action(/^paid:(.+)$/, async (ctx) => {
-    await ctx.answerCbQuery();
-    ctx.session.awaitingTxHashForOrder = ctx.match[1];
-    await ctx.reply(
-      '🧾 Please send your *transaction hash* now as a message.\n\n' +
-        'Your order will be verified and your API delivered automatically once payment is confirmed.',
-      { parse_mode: 'MarkdownV2' },
-    );
+  // Pay with KHQR → reserve stock + send QR
+  b.action(/^paykhqr:(.+)$/, async (ctx) => {
+    try {
+      await ctx.answerCbQuery('Generating your KHQR…');
+      await startKhqrPurchase(ctx, ctx.match[1]);
+    } catch (err) {
+      const msg = err instanceof AppError ? err.message : 'Could not start KHQR payment';
+      await safeEditOrReply(ctx, `⚠️ ${msg}`, backHomeKeyboard());
+    }
+  });
+
+  // Pay with USDT/crypto → route to Support (no reservation)
+  b.action(/^payusdt:(.+)$/, async (ctx) => {
+    try {
+      await ctx.answerCbQuery();
+      await showUsdtSupport(ctx, ctx.match[1]);
+    } catch (err) {
+      const msg = err instanceof AppError ? err.message : 'Could not load support details';
+      await safeEditOrReply(ctx, `⚠️ ${msg}`, backHomeKeyboard());
+    }
   });
 
   // Cancel order
@@ -292,7 +401,6 @@ export function buildBot(): Telegraf<BotContext> | null {
     try {
       const { cancelOrder } = await import('../services/order.service.js');
       await cancelOrder(ctx.match[1]);
-      ctx.session.awaitingTxHashForOrder = undefined;
       await safeEditOrReply(ctx, '❌ Your order was cancelled and the reserved API released.', backHomeKeyboard());
     } catch (err) {
       const msg = err instanceof AppError ? err.message : 'Could not cancel order';
@@ -304,31 +412,9 @@ export function buildBot(): Telegraf<BotContext> | null {
   b.action(/^reveal:(.+)$/, async (ctx) => revealKeyToOwner(ctx, ctx.match[1]));
   b.action(/^usage:(.+)$/, async (ctx) => showUsage(ctx, ctx.match[1]));
 
-  // Text messages — used to capture the TX hash.
+  // Any stray text message just returns the customer to the home menu.
   b.on(message('text'), async (ctx) => {
-    const orderId = ctx.session.awaitingTxHashForOrder;
-    const text = ctx.message.text.trim();
-    if (!orderId) {
-      await showHome(ctx);
-      return;
-    }
-    if (text.length < 6) {
-      await ctx.reply('That does not look like a valid transaction hash. Please try again.');
-      return;
-    }
-    try {
-      await submitTransactionHash(orderId, ctx.from.id, text);
-      ctx.session.awaitingTxHashForOrder = undefined;
-      logger.info('bot', `TX hash submitted for order by @${ctx.from.username ?? ctx.from.id}`);
-      await ctx.reply(
-        '✅ Thank you! Your payment is being verified.\n\n' +
-          'You will receive your API credentials here automatically once it is confirmed.',
-        backHomeKeyboard(),
-      );
-    } catch (err) {
-      const msg = err instanceof AppError ? err.message : 'Could not record your transaction';
-      await ctx.reply(`⚠️ ${msg}`);
-    }
+    await showHome(ctx);
   });
 
   b.catch((err, ctx) => {
@@ -363,6 +449,26 @@ export async function sendOrderDelivery(orderId: string): Promise<void> {
     logger.info('bot', `Delivered credentials for order ${info.order_number}`);
   } catch (err) {
     logger.error('bot', `Delivery failed for order ${orderId}: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Tell a customer their payment window elapsed and the reservation was
+ * released. Called by the expiry worker. Fire-and-forget; never throws.
+ */
+export async function sendOrderExpired(orderId: string): Promise<void> {
+  if (!bot) return;
+  try {
+    const info = await getOrderNotifyInfo(orderId);
+    if (!info || !info.customer_tg) return;
+    await bot.telegram.sendMessage(
+      info.customer_tg,
+      orderExpiredMessage({ orderNumber: info.order_number, packageName: info.package_name }),
+      backHomeKeyboard(),
+    );
+    logger.info('bot', `Notified customer that order ${info.order_number} expired`);
+  } catch (err) {
+    logger.error('bot', `Expiry notice failed for order ${orderId}: ${(err as Error).message}`);
   }
 }
 

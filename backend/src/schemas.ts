@@ -58,6 +58,7 @@ export const updateSettingsSchema = z.object({
   khqr_profile_id: z.string().max(200).nullish(),
   khqr_secret_key: z.string().max(200).nullish(),
   khqr_enabled: z.boolean().optional(),
+  usdt_enabled: z.boolean().optional(),
 });
 
 export const updatePoliciesSchema = z.object({

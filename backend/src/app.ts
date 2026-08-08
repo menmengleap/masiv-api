@@ -27,7 +27,13 @@ export function createApp() {
   });
 
   // Public webhook endpoint — no auth, no rate limit (KHQR needs to reach it).
-  app.use('/webhooks/khqr', khqrWebhookRouter);
+  // Accepts form-encoded as well as JSON: payment gateways commonly POST
+  // `application/x-www-form-urlencoded`, which express.json() alone drops.
+  app.use(
+    '/webhooks/khqr',
+    express.urlencoded({ extended: false, limit: '256kb' }),
+    khqrWebhookRouter,
+  );
 
   app.use('/api', apiLimiter, apiRouter);
 

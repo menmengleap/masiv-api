@@ -2,7 +2,7 @@ import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/pool.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
-import type { OrderRow, OrderStatus, PaymentRow, PaymentStatus } from '../types.js';
+import type { OrderRow, OrderStatus, PaymentMethod, PaymentRow, PaymentStatus } from '../types.js';
 import { getSettings } from './settings.service.js';
 
 /**
@@ -35,10 +35,14 @@ export interface CreateOrderResult {
  * pending order + pending payment invoice. Throws 409 if the package is out of
  * stock. Does NOT deliver credentials — that only happens after payment is
  * server-verified via `confirmPayment`.
+ *
+ * `method` records how the customer intends to pay so the dashboard can tell a
+ * KHQR bank transfer from a manually-arranged USDT transfer.
  */
 export async function createOrderForPackage(
   customerId: string,
   packageId: string,
+  method: PaymentMethod = 'khqr',
 ): Promise<CreateOrderResult> {
   const settings = await getSettings();
   const rate = Number(settings.usd_to_usdt) || 1;
@@ -92,20 +96,26 @@ export async function createOrderForPackage(
     const order = orderRes.rows[0];
 
     const paymentRes = await client.query<PaymentRow>(
-      `INSERT INTO payments (order_id, currency, amount, network, wallet_address, status, expires_at)
-       VALUES ($1, $2, $3, $4, $5, 'pending', NOW() + ($6 || ' minutes')::interval)
+      `INSERT INTO payments (order_id, currency, amount, method, network, wallet_address, status, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW() + ($7 || ' minutes')::interval)
        RETURNING *`,
       [
         order.id,
         settings.payment_currency,
         amount,
-        settings.payment_network,
-        settings.payment_wallet,
+        method,
+        // The USDT wallet/network only describe a crypto transfer — stamping
+        // them onto a KHQR invoice made the dashboard show a bogus destination.
+        method === 'usdt' ? settings.payment_network : null,
+        method === 'usdt' ? settings.payment_wallet : null,
         timeoutMin,
       ],
     );
 
-    logger.info('api', `Order ${order.order_number} created (pending) for package ${pkg.name}`);
+    logger.info(
+      'api',
+      `Order ${order.order_number} created (pending, ${method}) for package ${pkg.name}`,
+    );
 
     return {
       order,
@@ -287,8 +297,11 @@ export async function cancelOrder(orderId: string, reason = 'cancelled'): Promis
 /**
  * Sweep pending orders whose payment window has elapsed: cancel them and
  * release reserved stock. Called by the expiry worker.
+ *
+ * Returns the ids of the orders that were expired so the caller can notify the
+ * customers whose QR ran out of time.
  */
-export async function expireStaleOrders(): Promise<number> {
+export async function expireStaleOrders(): Promise<string[]> {
   const { rows } = await query<{ id: string }>(
     `SELECT o.id
      FROM orders o
@@ -298,16 +311,16 @@ export async function expireStaleOrders(): Promise<number> {
        AND p.expires_at IS NOT NULL
        AND p.expires_at <= NOW()`,
   );
-  let count = 0;
+  const expired: string[] = [];
   for (const r of rows) {
     try {
       await cancelOrder(r.id, 'expired');
-      count++;
+      expired.push(r.id);
     } catch (err) {
       logger.warn('worker', `Failed to expire order ${r.id}: ${(err as Error).message}`);
     }
   }
-  return count;
+  return expired;
 }
 
 // ── Read models ────────────────────────────────────────────────
@@ -317,6 +330,7 @@ export interface OrderView extends OrderRow {
   telegram_user_id: string | null;
   package_name: string;
   payment_status: PaymentStatus | null;
+  payment_method: PaymentMethod | null;
   transaction_hash: string | null;
 }
 
@@ -354,12 +368,13 @@ export async function listOrders(opts?: {
              COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')), '') AS customer_label,
         c.telegram_user_id,
         pay.status AS payment_status,
+        pay.method AS payment_method,
         pay.transaction_hash
      FROM orders o
      JOIN packages p ON p.id = o.package_id
      JOIN customers c ON c.id = o.customer_id
      LEFT JOIN LATERAL (
-        SELECT status, transaction_hash FROM payments
+        SELECT status, method, transaction_hash FROM payments
         WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
      ) pay ON TRUE
      ${where}
@@ -372,21 +387,17 @@ export async function listOrders(opts?: {
 }
 
 export async function getOrder(id: string): Promise<OrderView> {
-  const { items } = await listOrders({ limit: 1, offset: 0 });
-  const found = items.find((o) => o.id === id);
-  if (found) return found;
-  // Fallback direct fetch (listOrders is paginated).
   const { rows } = await query<OrderView>(
     `SELECT o.*, p.name AS package_name,
         NULLIF(TRIM(COALESCE(c.telegram_username,'') || ' ' ||
              COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')), '') AS customer_label,
         c.telegram_user_id,
-        pay.status AS payment_status, pay.transaction_hash
+        pay.status AS payment_status, pay.method AS payment_method, pay.transaction_hash
      FROM orders o
      JOIN packages p ON p.id = o.package_id
      JOIN customers c ON c.id = o.customer_id
      LEFT JOIN LATERAL (
-        SELECT status, transaction_hash FROM payments
+        SELECT status, method, transaction_hash FROM payments
         WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
      ) pay ON TRUE
      WHERE o.id = $1`,

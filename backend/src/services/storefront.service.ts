@@ -195,3 +195,27 @@ export async function getDeliveryInfo(orderId: string): Promise<OrderDeliveryInf
   if (!r) return null;
   return { ...r, masked_key: maskFromLast4(r.token_last4) };
 }
+
+export interface OrderNotifyInfo {
+  order_number: string;
+  customer_tg: string | null;
+  package_name: string;
+}
+
+/**
+ * Minimal order info for notifying a customer about an order that was NOT
+ * delivered (e.g. its payment window expired). Unlike `getDeliveryInfo` this
+ * does not join `tokens`, so it still resolves after the reserved token has
+ * been released back to stock.
+ */
+export async function getOrderNotifyInfo(orderId: string): Promise<OrderNotifyInfo | null> {
+  const { rows } = await query<OrderNotifyInfo>(
+    `SELECT o.order_number, c.telegram_user_id AS customer_tg, p.name AS package_name
+     FROM orders o
+     JOIN customers c ON c.id = o.customer_id
+     JOIN packages p ON p.id = o.package_id
+     WHERE o.id = $1`,
+    [orderId],
+  );
+  return rows[0] ?? null;
+}

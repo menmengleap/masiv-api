@@ -18,6 +18,9 @@ export type OrderStatus =
   | 'refunded';
 export type PaymentStatus = 'pending' | 'confirmed' | 'failed' | 'expired' | 'refunded';
 
+/** How a payment was collected. */
+export type PaymentMethod = 'khqr' | 'usdt' | 'manual';
+
 export interface Admin {
   id: string;
   username: string;
@@ -91,6 +94,7 @@ export interface OrderView {
   telegram_user_id: string | null;
   package_name: string;
   payment_status: PaymentStatus | null;
+  payment_method: PaymentMethod | null;
   transaction_hash: string | null;
 }
 
@@ -101,6 +105,7 @@ export interface PaymentView {
   order_number: string;
   currency: string;
   amount: string;
+  method: PaymentMethod;
   network: string | null;
   wallet_address: string | null;
   transaction_hash: string | null;
@@ -153,8 +158,10 @@ export interface BotSettings {
   support_username: string | null;
   documentation_url: string | null;
   khqr_profile_id: string | null;
-  khqr_secret_key: string | null;
+  /** Never sent by the API — the secret is write-only. */
+  khqr_secret_key_set: boolean;
   khqr_enabled: boolean;
+  usdt_enabled: boolean;
   updated_at: string;
 }
 

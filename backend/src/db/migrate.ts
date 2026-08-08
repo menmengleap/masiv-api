@@ -113,7 +113,8 @@ Payment is accepted in USDT.
 💳 PAYMENT
 
 We currently accept:
-• USDT Crypto Payment
+• 🇰🇭 KHQR — scan with any Cambodian bank app (ABA, Wing, ACLEDA…)
+• 💵 USDT Crypto — arranged with our Support team
 
 ━━━━━━━━━━━━━━━━━━
 
