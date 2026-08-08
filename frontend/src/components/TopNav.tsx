@@ -54,9 +54,7 @@ export function TopNav({ onMenu }: { onMenu: () => void }) {
             onBlur={() => window.setTimeout(() => setMenuOpen(false), 150)}
             className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 hover:bg-ink-800"
           >
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand/20 text-xs font-bold uppercase text-brand-400">
-              {admin?.username?.slice(0, 2) ?? 'AD'}
-            </div>
+            <img src="/logo.png" alt="Profile" className="h-7 w-7 rounded-full object-contain" />
             <span className="hidden text-sm font-medium text-gray-200 sm:inline">
               {admin?.username ?? 'admin'}
             </span>
@@ -65,9 +63,12 @@ export function TopNav({ onMenu }: { onMenu: () => void }) {
 
           {menuOpen && (
             <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-xl border border-ink-700 bg-ink-850 shadow-2xl">
-              <div className="border-b border-ink-700 px-4 py-3">
-                <p className="text-sm font-medium text-gray-100">{admin?.username}</p>
-                <p className="text-xs text-gray-500">Administrator</p>
+              <div className="flex items-center gap-3 border-b border-ink-700 px-4 py-3">
+                <img src="/logo.png" alt="Profile" className="h-8 w-8 rounded-full object-contain" />
+                <div>
+                  <p className="text-sm font-medium text-gray-100">{admin?.username}</p>
+                  <p className="text-xs text-gray-500">Administrator</p>
+                </div>
               </div>
               <button
                 onMouseDown={(e) => {

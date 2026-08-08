@@ -179,14 +179,9 @@ export async function updatePackage(id: string, input: UpdatePackageInput): Prom
 }
 
 export async function deletePackage(id: string): Promise<void> {
-  // Guard: don't delete a package that still has stock/orders referencing it.
-  const { rows } = await query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM tokens WHERE package_id = $1`,
-    [id],
-  );
-  if (Number(rows[0].count) > 0) {
-    throw badRequest('Cannot delete a package that still has API stock. Deactivate it instead.');
-  }
+  const { rows: pkgRows } = await query<PackageRow>('SELECT id, name FROM packages WHERE id = $1', [id]);
+  if (!pkgRows[0]) throw notFound('Package not found');
+
   const { rows: orderRows } = await query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM orders WHERE package_id = $1`,
     [id],
@@ -194,6 +189,9 @@ export async function deletePackage(id: string): Promise<void> {
   if (Number(orderRows[0].count) > 0) {
     throw badRequest('Cannot delete a package with existing orders. Deactivate it instead.');
   }
-  const res = await query('DELETE FROM packages WHERE id = $1', [id]);
-  if (res.rowCount === 0) throw notFound('Package not found');
+
+  await withTransaction(async (client) => {
+    await client.query('DELETE FROM tokens WHERE package_id = $1 AND is_used = FALSE', [id]);
+    await client.query('DELETE FROM packages WHERE id = $1', [id]);
+  });
 }
