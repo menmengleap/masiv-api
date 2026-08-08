@@ -48,9 +48,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       >
         <div className="flex h-16 items-center justify-between px-5">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-black">
-              <span className="text-lg font-black">M</span>
-            </div>
+            <img src="/logo.png" alt="Masiv API" className="h-9 w-9 rounded-lg object-contain" />
             <div className="leading-tight">
               <p className="text-sm font-semibold text-white">Masiv API</p>
               <p className="text-[11px] text-gray-500">Admin Console</p>
