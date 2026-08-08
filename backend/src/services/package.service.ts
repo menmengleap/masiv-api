@@ -1,5 +1,5 @@
 import { db, query, withTransaction, type Queryable } from '../db/pool.js';
-import { conflict, notFound, badRequest } from '../lib/errors.js';
+import { conflict, notFound } from '../lib/errors.js';
 import { defaultPackageName, normalizeTokens } from '../lib/tokens.js';
 import type { PackageRow } from '../types.js';
 
