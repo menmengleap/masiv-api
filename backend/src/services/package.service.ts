@@ -182,16 +182,9 @@ export async function deletePackage(id: string): Promise<void> {
   const { rows: pkgRows } = await query<PackageRow>('SELECT id, name FROM packages WHERE id = $1', [id]);
   if (!pkgRows[0]) throw notFound('Package not found');
 
-  const { rows: orderRows } = await query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM orders WHERE package_id = $1`,
-    [id],
-  );
-  if (Number(orderRows[0].count) > 0) {
-    throw badRequest('Cannot delete a package with existing orders. Deactivate it instead.');
-  }
-
   await withTransaction(async (client) => {
     await client.query('DELETE FROM tokens WHERE package_id = $1 AND is_used = FALSE', [id]);
+    await client.query('UPDATE orders SET package_id = NULL WHERE package_id = $1', [id]);
     await client.query('DELETE FROM packages WHERE id = $1', [id]);
   });
 }

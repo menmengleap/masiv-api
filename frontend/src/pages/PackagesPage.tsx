@@ -157,8 +157,8 @@ export function PackagesPage() {
         confirmLabel="Delete"
         message={
           <>
-            Delete <span className="font-medium text-gray-200">{toDelete?.name}</span>? Packages with existing
-            stock or orders can't be deleted — deactivate them instead.
+            Delete <span className="font-medium text-gray-200">{toDelete?.name}</span>? This will remove
+            all unsold stock and unlink existing orders.
           </>
         }
       />
