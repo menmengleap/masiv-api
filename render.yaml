@@ -1,0 +1,56 @@
+services:
+  # ── PostgreSQL ─────────────────────────────────────────
+  - type: postgresql
+    name: masiv-db
+    database: masiv
+    plan: starter
+    ipAllowList: []
+
+  # ── Backend API + Bot + Worker ─────────────────────────
+  - type: web
+    name: masiv-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: masiv-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: CORS_ORIGIN
+        sync: false  # Set to your frontend Render URL after first deploy
+      - key: ADMIN_USERNAME
+        value: masivteam
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false  # Optional — leave empty to disable bot
+      - key: EXPIRY_WORKER_INTERVAL_MS
+        value: "60000"
+      - key: EXPIRING_THRESHOLD_DAYS
+        value: "7"
+      - key: PAYMENT_TIMEOUT_MINUTES
+        value: "30"
+
+  # ── Frontend Dashboard ────────────────────────────────
+  - type: web
+    name: masiv-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BACKEND_URL
+        sync: false  # Set to your backend Render URL after first deploy (e.g. https://masiv-backend.onrender.com)

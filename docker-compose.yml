@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: masiv-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: masiv
+      POSTGRES_PASSWORD: masiv
+      POSTGRES_DB: masiv
+    ports:
+      - "5432:5432"
+    volumes:
+      - masiv_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U masiv -d masiv"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Full stack (opt-in): `docker compose --profile full up -d --build` ──
+  # Without the profile, `docker compose up -d` starts only Postgres for local dev.
+  backend:
+    profiles: ["full"]
+    build: ./backend
+    container_name: masiv-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      # Reach Postgres by its compose service name, not localhost.
+      DATABASE_URL: postgresql://masiv:masiv@postgres:5432/masiv
+      # The dashboard is same-origin (nginx proxies /api), so this is the frontend origin.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      # ⚠ Override these in a root .env for any real deployment (see .env.example).
+      JWT_SECRET: ${JWT_SECRET:-Qgn3MMIKAxPXgQzp32X9VyxZFw8exuY5nTAZCAq-cAXILNq5LB-1G1glv6Lzxe8HtqbMtgs_D0yasOkQl9a_5g}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-000000000000000000000000000000000000000000000000000000000₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀₀}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      EXPIRY_WORKER_INTERVAL_MS: ${EXPIRY_WORKER_INTERVAL_MS:-60000}
+      EXPIRING_THRESHOLD_DAYS: ${EXPIRING_THRESHOLD_DAYS:-7}
+      PAYMENT_TIMEOUT_MINUTES: ${PAYMENT_TIMEOUT_MINUTES:-30}
+    ports:
+      - "4000:4000"
+
+  frontend:
+    profiles: ["full"]
+    build: ./frontend
+    container_name: masiv-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  masiv_pgdata:
