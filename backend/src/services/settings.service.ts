@@ -18,6 +18,9 @@ export interface UpdateSettingsInput {
   welcome_message?: string | null;
   support_username?: string | null;
   documentation_url?: string | null;
+  khqr_profile_id?: string | null;
+  khqr_secret_key?: string | null;
+  khqr_enabled?: boolean;
 }
 
 export async function updateSettings(input: UpdateSettingsInput): Promise<BotSettingsRow> {
@@ -34,8 +37,11 @@ export async function updateSettings(input: UpdateSettingsInput): Promise<BotSet
         welcome_message = $7,
         support_username = $8,
         documentation_url = $9,
+        khqr_profile_id = $10,
+        khqr_secret_key = $11,
+        khqr_enabled = $12,
         updated_at = NOW()
-     WHERE id = $10
+     WHERE id = $13
      RETURNING *`,
     [
       merged.bot_name,
@@ -47,6 +53,9 @@ export async function updateSettings(input: UpdateSettingsInput): Promise<BotSet
       merged.welcome_message,
       merged.support_username,
       merged.documentation_url,
+      merged.khqr_profile_id ?? null,
+      merged.khqr_secret_key ?? null,
+      merged.khqr_enabled ?? false,
       current.id,
     ],
   );

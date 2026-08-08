@@ -45,6 +45,8 @@ export const config = {
 
   telegramBotToken: optional('TELEGRAM_BOT_TOKEN'),
 
+  frontendUrl: optional('FRONTEND_URL', 'http://localhost:5173'),
+
   expiryWorkerIntervalMs: int('EXPIRY_WORKER_INTERVAL_MS', 60_000),
   expiringThresholdDays: int('EXPIRING_THRESHOLD_DAYS', 7),
   paymentTimeoutMinutes: int('PAYMENT_TIMEOUT_MINUTES', 30),

@@ -105,6 +105,9 @@ export interface BotSettingsRow {
   welcome_message: string | null;
   support_username: string | null;
   documentation_url: string | null;
+  khqr_profile_id: string | null;
+  khqr_secret_key: string | null;
+  khqr_enabled: boolean;
   updated_at: string;
 }
 

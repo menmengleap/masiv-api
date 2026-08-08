@@ -6,6 +6,7 @@ import { config } from './config/index.js';
 import { apiLimiter } from './middleware/ratelimit.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { apiRouter } from './routes/index.js';
+import { khqrWebhookRouter } from './routes/khqr.routes.js';
 
 export function createApp() {
   const app = express();
@@ -24,6 +25,9 @@ export function createApp() {
   app.get('/health', (_req, res) => {
     res.json({ ok: true, service: 'masiv-api', env: config.env });
   });
+
+  // Public webhook endpoint — no auth, no rate limit (KHQR needs to reach it).
+  app.use('/webhooks/khqr', khqrWebhookRouter);
 
   app.use('/api', apiLimiter, apiRouter);
 

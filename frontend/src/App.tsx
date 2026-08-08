@@ -17,6 +17,7 @@ import { PaymentsPage } from './pages/PaymentsPage';
 import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { PaymentSuccessPage } from './pages/PaymentSuccessPage';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/payment/success" element={<PaymentSuccessPage />} />
           <Route
             element={
               <ProtectedRoute>

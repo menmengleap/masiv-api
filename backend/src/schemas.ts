@@ -55,6 +55,9 @@ export const updateSettingsSchema = z.object({
   welcome_message: z.string().max(8000).nullish(),
   support_username: z.string().max(120).nullish(),
   documentation_url: z.string().max(500).nullish(),
+  khqr_profile_id: z.string().max(200).nullish(),
+  khqr_secret_key: z.string().max(200).nullish(),
+  khqr_enabled: z.boolean().optional(),
 });
 
 export const updatePoliciesSchema = z.object({

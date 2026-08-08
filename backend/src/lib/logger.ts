@@ -7,7 +7,7 @@
  */
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
-export type LogSource = 'api' | 'bot' | 'worker' | 'db' | 'system';
+export type LogSource = 'api' | 'bot' | 'worker' | 'db' | 'system' | 'khqr';
 
 export interface LogEntry {
   ts: string;

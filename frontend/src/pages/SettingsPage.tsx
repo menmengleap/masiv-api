@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Save, Bot, FileText, Wallet } from 'lucide-react';
+import { Save, Bot, FileText, Wallet, QrCode } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { BotSettings, ServicePolicies } from '../lib/types';
 import { useApi } from '../hooks/useApi';
@@ -36,6 +36,9 @@ type SettingsForm = {
   welcome_message: string;
   support_username: string;
   documentation_url: string;
+  khqr_profile_id: string;
+  khqr_secret_key: string;
+  khqr_enabled: boolean;
 };
 
 function toForm(s: BotSettings): SettingsForm {
@@ -49,6 +52,9 @@ function toForm(s: BotSettings): SettingsForm {
     welcome_message: s.welcome_message ?? '',
     support_username: s.support_username ?? '',
     documentation_url: s.documentation_url ?? '',
+    khqr_profile_id: s.khqr_profile_id ?? '',
+    khqr_secret_key: s.khqr_secret_key ?? '',
+    khqr_enabled: s.khqr_enabled ?? false,
   };
 }
 
@@ -63,7 +69,7 @@ function BotSettingsForm() {
     if (settings.data) setForm(toForm(settings.data));
   }, [settings.data]);
 
-  const set = (k: keyof SettingsForm, v: string) => setForm((f) => (f ? { ...f, [k]: v } : f));
+  const set = (k: keyof SettingsForm, v: string | boolean) => setForm((f) => (f ? { ...f, [k]: v } : f));
 
   const save = async () => {
     if (!form) return;
@@ -80,6 +86,9 @@ function BotSettingsForm() {
         welcome_message: form.welcome_message.trim() || null,
         support_username: form.support_username.trim() || null,
         documentation_url: form.documentation_url.trim() || null,
+        khqr_profile_id: form.khqr_profile_id.trim() || null,
+        khqr_secret_key: form.khqr_secret_key.trim() || null,
+        khqr_enabled: form.khqr_enabled,
       };
       const updated = await api.put<BotSettings>('/api/settings', payload);
       setForm(toForm(updated));
@@ -136,6 +145,35 @@ function BotSettingsForm() {
               <input className="input" inputMode="numeric" value={form.payment_timeout_minutes} onChange={(e) => set('payment_timeout_minutes', e.target.value)} />
             </Field>
           </div>
+        </div>
+
+        <div className="border-t border-ink-750 pt-5">
+          <p className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-300">
+            <QrCode className="h-4 w-4 text-brand-400" /> KHQR Payment Gateway
+          </p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="flex items-center gap-3 md:col-span-2">
+              <label className="relative inline-flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="peer sr-only"
+                  checked={form.khqr_enabled}
+                  onChange={(e) => set('khqr_enabled', e.target.checked)}
+                />
+                <div className="h-6 w-11 rounded-full bg-ink-700 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-gray-400 after:transition-all peer-checked:bg-brand-600 peer-checked:after:translate-x-full peer-checked:after:bg-white" />
+                <span className="text-sm text-gray-300">Enable KHQR payments</span>
+              </label>
+            </div>
+            <Field label="KHQR Profile ID" hint="From your KHQR.cc dashboard.">
+              <input className="input font-mono" value={form.khqr_profile_id} placeholder="QrBbF2nv..." spellCheck={false} onChange={(e) => set('khqr_profile_id', e.target.value)} />
+            </Field>
+            <Field label="KHQR Secret Key" hint="Used to sign payment hashes. Never share this.">
+              <input className="input font-mono" type="password" value={form.khqr_secret_key} placeholder="Your secret key" spellCheck={false} onChange={(e) => set('khqr_secret_key', e.target.value)} />
+            </Field>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            When enabled, customers can pay via KHQR (ABA Pay, Wing, etc.). Webhook URL: {window.location.origin.replace('frontend', 'api').replace('5173', '4000')}/webhooks/khqr
+          </p>
         </div>
 
         <Field label="Welcome message" hint="Sent on /start. Supports plain text.">

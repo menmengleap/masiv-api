@@ -10,6 +10,7 @@ import { settingsRouter, policyRouter } from './settings.routes.js';
 import { logsRouter } from './logs.routes.js';
 import { expiryRouter } from './expiry.routes.js';
 import { telegramRouter } from './telegram.routes.js';
+import { khqrRouter } from './khqr.routes.js';
 
 export const apiRouter = Router();
 
@@ -28,3 +29,4 @@ apiRouter.use('/policies', requireAuth, policyRouter);
 apiRouter.use('/logs', requireAuth, logsRouter);
 apiRouter.use('/expiry', requireAuth, expiryRouter);
 apiRouter.use('/telegram', requireAuth, telegramRouter);
+apiRouter.use('/khqr', requireAuth, khqrRouter);
