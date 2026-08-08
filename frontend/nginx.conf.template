@@ -4,27 +4,22 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Gzip static assets.
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
     gzip_min_length 1024;
 
-    # SPA client-side routing: fall back to index.html for unknown paths.
     location / {
         try_files $uri $uri/ /index.html;
     }
 
-    # Cache hashed build assets aggressively.
     location /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable";
         try_files $uri =404;
     }
 
-    # Reverse-proxy the backend so the API is same-origin (first-party cookie).
-    # $BACKEND_URL is injected at container startup via envsubst.
     location /api/ {
-        proxy_pass ${BACKEND_URL};
+        proxy_pass BACKEND_URL_PLACEHOLDER;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -33,7 +28,7 @@ server {
     }
 
     location /health {
-        proxy_pass ${BACKEND_URL};
+        proxy_pass BACKEND_URL_PLACEHOLDER;
         proxy_set_header Host $host;
     }
 }
