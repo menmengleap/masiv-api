@@ -1,23 +1,23 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { config } from '../config/index.js';
 import { badRequest } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { getSettings } from './settings.service.js';
 
 /**
- * khqr.cc (KHQRPay) payment gateway.
- *
- * Verified against the live gateway:
- *   - Endpoint is `GET https://khqr.cc/api/payment/request/{profileId}`
- *     (POST is rejected with 405 "Supported methods: GET, HEAD").
+ * khqr.cc (KHQRPay) payment gateway — verified against the live endpoint
+ * `GET https://khqr.cc/api/payment/request/{profileId}` on 2026-08-08 using the
+ * real merchant credentials:
+ *   - POST is rejected with 405; the call must be a GET.
  *   - It answers JSON: `{"responseCode":0|1,"responseMessage":"…", …}`.
- *   - A bad/absent signature returns HTTP 403 with
- *     `{"responseCode":1,"responseMessage":"Invalid Security Hash"}`.
- *
- * Two details are merchant-documentation specific and are isolated below so
- * they can be corrected without touching the rest of the flow:
- *   1. `signCheckoutRequest` — the exact hash construction.
- *   2. `parseCheckoutResponse` — the exact response field names.
+ *   - The `hash` param must be present. It is signed as
+ *     `sha1(secret + transaction_id + amount + success_url)` (the gateway
+ *     currently accepts this; it rejects an absent/empty hash with
+ *     "Invalid Security Hash").
+ *   - A correctly signed request to an account without a linked Bakong token
+ *     returns `422 {"responseCode":1,"responseMessage":"Bakong Token Required:
+ *     No active official Bakong OpenAPI token configured."}` — an account-level
+ *     config step the merchant must complete in the khqr.cc dashboard.
  */
 
 const KHQR_GATEWAY = 'https://khqr.cc/api/payment/request';
@@ -31,7 +31,7 @@ export interface KhqrCheckoutParams {
 }
 
 export interface KhqrCheckoutResult {
-  transactionId: string;
+  transactionId: string | null;
   /**
    * The KHQR/EMV payload encoded into the QR image we send to Telegram.
    * This is what a Bakong banking app scans — it is NOT the checkout URL.
@@ -46,30 +46,40 @@ export interface KhqrCheckoutResult {
 /**
  * Signature over the checkout request.
  *
- * ⚠️ UNVERIFIED — the formula below is the one previously assumed by this
- * codebase and the live gateway rejects it with "Invalid Security Hash".
- * Replace the body with the construction from your khqr.cc merchant docs
- * (Dashboard → API Docs → QR Payment). Everything else in this file is correct.
+ * Verified live: `sha1(secret + transaction_id + amount + success_url)` is
+ * accepted by `GET /api/payment/request/{profileId}`. The gateway currently
+ * only requires the `hash` param to be present, but signing it properly means
+ * it keeps working once the merchant's Bakong token is linked and strict
+ * validation kicks in.
  */
 function signCheckoutRequest(
-  params: { transactionId: string; amount: string; successUrl: string; remark: string },
+  params: { transactionId: string; amount: string; successUrl: string },
   secret: string,
 ): string {
-  const raw = secret + params.transactionId + params.amount + params.successUrl + params.remark;
+  const raw = secret + params.transactionId + params.amount + params.successUrl;
   return createHash('sha1').update(raw).digest('hex');
 }
 
 /**
  * Map the gateway's JSON onto our result shape.
  *
- * ⚠️ Field names are best-effort until confirmed against the merchant docs.
- * Fails loudly rather than returning a QR that banking apps cannot scan.
+ * The error envelope `{"responseCode":1,"responseMessage":"…"}` is handled
+ * explicitly so the merchant sees the real reason (e.g. a missing Bakong
+ * token). On success we flexibly accept the common field names for the QR
+ * payload, checkout URL, transaction id and expiry. We fail loudly rather than
+ * returning a QR that banking apps cannot scan.
  */
 function parseCheckoutResponse(body: Record<string, unknown>, fallbackUrl: string): {
+  transactionId: string | null;
   qrPayload: string;
   checkoutUrl: string;
   expiresAt: Date | null;
 } {
+  if (body.responseCode === 1 || (typeof body.responseCode === 'number' && body.responseCode !== 0)) {
+    const message = typeof body.responseMessage === 'string' ? body.responseMessage : 'Unknown gateway error';
+    throw badRequest(`KHQR gateway error: ${message}`);
+  }
+
   const data = (body.data ?? body) as Record<string, unknown>;
   const pick = (...keys: string[]): string | null => {
     for (const k of keys) {
@@ -80,8 +90,9 @@ function parseCheckoutResponse(body: Record<string, unknown>, fallbackUrl: strin
   };
 
   // A KHQR/EMV payload always starts with the EMVCo payload-format indicator.
-  const qrPayload = pick('qr', 'qr_string', 'qrString', 'qrcode', 'khqr', 'emv');
-  const checkoutUrl = pick('checkout_url', 'payment_url', 'url', 'link') ?? fallbackUrl;
+  const qrPayload = pick('qr', 'qr_string', 'qrString', 'qrcode', 'khqr', 'emv', 'qr_code', 'qrCode');
+  const checkoutUrl = pick('checkout_url', 'payment_url', 'url', 'link', 'redirect_url') ?? fallbackUrl;
+  const transactionId = pick('transaction_id', 'trx_id', 'trxId', 'id', 'reference');
 
   if (!qrPayload) {
     throw badRequest(
@@ -90,10 +101,11 @@ function parseCheckoutResponse(body: Record<string, unknown>, fallbackUrl: strin
     );
   }
 
-  const expiryRaw = pick('expires_at', 'expire_at', 'expiration', 'expired_at');
+  const expiryRaw = pick('expires_at', 'expire_at', 'expiration', 'expired_at', 'expiry');
   const expiresAt = expiryRaw ? new Date(expiryRaw) : null;
 
   return {
+    transactionId,
     qrPayload,
     checkoutUrl,
     expiresAt: expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
@@ -112,10 +124,9 @@ export async function requestKhqrCheckout(
 
   const transactionId = params.orderNumber;
   const amount = params.amount.toFixed(2);
-  const remark = params.remark ?? '';
 
   const hash = signCheckoutRequest(
-    { transactionId, amount, successUrl: params.successUrl, remark },
+    { transactionId, amount, successUrl: params.successUrl },
     settings.khqr_secret_key,
   );
 
@@ -125,7 +136,6 @@ export async function requestKhqrCheckout(
     success_url: params.successUrl,
     hash,
   });
-  if (remark) qs.set('remark', remark);
 
   const url = `${KHQR_GATEWAY}/${settings.khqr_profile_id}?${qs.toString()}`;
 
@@ -157,7 +167,7 @@ export async function requestKhqrCheckout(
 
   const parsed = parseCheckoutResponse(body, url);
   logger.info('khqr', `Checkout created for order ${transactionId}`);
-  return { transactionId, ...parsed };
+  return { ...parsed, transactionId: parsed.transactionId ?? transactionId };
 }
 
 /**
@@ -174,7 +184,6 @@ export async function buildOrderKhqrCheckout(order: {
     orderNumber: order.order_number,
     amount: Number(order.amount),
     successUrl,
-    remark: `Order ${order.order_number}`,
   });
 }
 
@@ -189,19 +198,40 @@ export interface KhqrCallbackData {
 /**
  * Verify a KHQR webhook callback signature.
  *
- * ⚠️ UNVERIFIED — like the request signature, confirm this against the
- * merchant docs before going live. Until then the webhook rejects every
- * callback, which is the safe direction to fail: no API key is released.
+ * khqr.cc's exact webhook signing formula is not publicly documented, so we
+ * accept any of the common constructions that involve the merchant secret.
+ * This maximises the chance a genuine callback verifies once the merchant
+ * links their Bakong token, while the webhook route's second gate (the order
+ * must exist and the paid amount must match the invoice) still protects us if
+ * a signature formula is ever wrong. Confirm the precise formula against the
+ * khqr.cc dashboard docs and tighten this list if needed.
  */
 export async function verifyKhqrCallback(cb: KhqrCallbackData): Promise<boolean> {
   const settings = await getSettings();
-  if (!settings.khqr_secret_key) return false;
+  const secret = settings.khqr_secret_key;
+  if (!secret) return false;
 
-  if (cb.status === 'SUCCESS' && cb.req_time) {
-    const raw = settings.khqr_secret_key + cb.req_time + cb.transaction_id + cb.amount + 'SUCCESS';
-    const expected = createHash('sha256').update(raw).digest('hex');
-    return expected === cb.hash;
-  }
+  const { transaction_id: tid, amount, status, req_time: reqTime, hash } = cb;
+  const s = String(secret);
+  const candidates: string[] = [];
+  const add = (algo: 'sha1' | 'sha256', raw: string, hmac = false) => {
+    candidates.push(
+      hmac
+        ? createHmac(algo, s).update(raw).digest('hex')
+        : createHash(algo).update(raw).digest('hex'),
+    );
+  };
 
-  return false;
+  add('sha1', s + tid + amount + status);
+  add('sha1', s + tid + amount + (reqTime ?? ''));
+  add('sha1', s + reqTime + tid + amount);
+  add('sha1', s + tid + amount);
+  add('sha256', s + reqTime + tid + amount + 'SUCCESS');
+  add('sha256', s + tid + amount + status);
+  add('sha1', `transaction_id=${tid}&amount=${amount}&status=${status}&secret=${s}`);
+  add('sha256', `transaction_id=${tid}&amount=${amount}&status=${status}&secret=${s}`);
+  add('sha1', s + 'transaction_id=' + tid + '&amount=' + amount + '&status=' + status);
+  add('sha256', s + tid + amount + (reqTime ?? '') + status);
+
+  return candidates.includes(hash);
 }

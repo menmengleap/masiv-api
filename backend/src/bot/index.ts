@@ -190,11 +190,13 @@ async function startKhqrPurchase(ctx: BotContext, packageId: string) {
     );
     logger.info('bot', `KHQR order ${order.order_number} started by @${u.username ?? u.id} for ${pkg.name}`);
   } catch (err) {
-    // Building the QR failed (e.g. KHQR not configured) — release the reservation
-    // so we don't strand stock, then surface the reason.
+    // Building the QR failed (e.g. KHQR not configured, or the gateway rejected
+    // the request) — release the reservation so we don't strand stock, then
+    // surface the reason to the customer instead of crashing.
     const { cancelOrder } = await import('../services/order.service.js');
     await cancelOrder(order.id).catch(() => undefined);
-    throw err;
+    const msg = err instanceof Error ? err.message : 'KHQR checkout failed. Please try another method or contact Support.';
+    await safeEditOrReply(ctx, `⚠️ ${msg}`, backHomeKeyboard()).catch(() => undefined);
   }
 }
 
